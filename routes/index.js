@@ -1,35 +1,108 @@
 const errors = require('restify-errors');
 const Todo = require('../models/todo');
+const fs = require('fs');
+const config = require('../config')
 
-function promiseFunction(req, res, next){
-    return new Promise((fulfill) => {
+function contentValidator(req){
+    return new Promise((resolve, reject) => {
+        if (!req.is('application/json')) {
+            reject();
+            return next(
+                new errors.InvalidContentError("Expects 'application/json'"),
+            );
+        }else{
+            resolve();
+        }
+    })
+}
+
+function displayAllData(req, res, next){
+    return new Promise((resolve, reject) => {
         Todo.apiQuery(req.params, function(err, docs) {
             if (err) {
                 console.error(err);
                 return next(
                     new errors.InvalidContentError(err.errors.name.message),
                 );
+                reject();
             }
             res.send(docs);
-            fulfill();
+            resolve();
             next();
         });
     });
 }
 
-function callbackFunction(req, res, next, callback){
-    Todo.apiQuery(req.params, function(err, docs) {
+function addData(req, res, next, callback){
+    let data = req.body || {};
+    let todo = new Todo(data);
+    todo.save(function(err) {
         if (err) {
-            console.error(err);
-            callback('error:', err);
-            return next(
-                new errors.InvalidContentError(err.errors.name.message),
-            );
+            return next(new errors.InternalError(err.message));
+            callback(err).then(log('Logged')).catch((err) => { log(err); });
+            next();
         }
-        res.send(docs);
+        res.send(201);
+        callback(`Data added: ${data.task}\n`);
         next();
-        callback('zala');
     });
+}
+
+function logToFile(data){
+    return new Promise((resolve, reject) => {
+        fs.appendFile(config.log_file, data, function(err){
+            if(err){
+                reject();
+            }else{
+                log('Logged');
+                resolve();
+            }
+        });
+    });
+}
+
+function updateData(req, res, next){
+    return new Promise((resolve, reject) => {
+        let data = req.body || {};
+        if (!data._id) {
+            data = Object.assign({}, data, { _id: req.params.todo_id });
+        }
+        Todo.findOne({ _id: req.params.todo_id }, function(err, doc) {
+            if (err) {
+                console.error(err);
+                reject();
+                return next(
+                    new errors.InvalidContentError(err.errors.name.message),
+                );
+            } else if (!doc) {
+                reject();
+                return next(
+                    new errors.ResourceNotFoundError(
+                        'The resource you requested could not be found.',
+                    ),
+                );
+            }
+            Todo.update({ _id: data._id }, data, function(err) {
+                if (err) {
+                    console.error(err);
+                    return next(
+                        new errors.InvalidContentError(err.errors.name.message),
+                    );
+                }
+                var result = {
+                    id: doc._id,
+                    old_task: doc.task,
+                    old_status: doc.status,
+                    new_task: data.task,
+                    new_status: data.status
+                }
+                console.log(result);
+                resolve(result);
+                res.send(200, data);
+                next();
+            });
+        });
+    })
 }
 
 function log(msg){
@@ -37,31 +110,14 @@ function log(msg){
 }
 
 module.exports = function(server) {
-    server.post('/todos', (req, res, next) => {
-        if (!req.is('application/json')) {
-            return next(
-                new errors.InvalidContentError("Expects 'application/json'"),
-            );
-        }
-        let data = req.body || {};
-        let todo = new Todo(data);
-        todo.save(function(err) {
-            if (err) {
-                console.error(err);
-                return next(new errors.InternalError(err.message));
-                next();
-            }
-            res.send(201);
-            next();
-        });
+    server.post('/todos', async (req, res, next) => {
+        await contentValidator(req).then(addData(req, res, next, logToFile)).catch((err) => { log(err); });
     });
 
-    // server.get('/todos', async (req, res, next) => {
-    //     await promiseFunction(req, res, next).then(log('done'));
-    // });
-
     server.get('/todos', (req, res, next) => {
-        callbackFunction(req, res, next, log);
+        var promise1 = displayAllData(req, res, next);
+        var promise2 = logToFile('display all\n');
+        Promise.all([promise1, promise2]).then(log('done')).catch((err) => { log(err); });
     });
 
     server.get('/todos/:todo_id', (req, res, next) => {
@@ -77,39 +133,13 @@ module.exports = function(server) {
         });
     });
 
-    server.put('/todos/:todo_id', (req, res, next) => {
-        if (!req.is('application/json')) {
-            return next(
-                new errors.InvalidContentError("Expects 'application/json'"),
-            );
-        }
-        let data = req.body || {};
-        if (!data._id) {
-            data = Object.assign({}, data, { _id: req.params.todo_id });
-        }
-        Todo.findOne({ _id: req.params.todo_id }, function(err, doc) {
-            if (err) {
-                console.error(err);
-                return next(
-                    new errors.InvalidContentError(err.errors.name.message),
-                );
-            } else if (!doc) {
-                return next(
-                    new errors.ResourceNotFoundError(
-                        'The resource you requested could not be found.',
-                    ),
-                );
-            }
-            Todo.update({ _id: data._id }, data, function(err) {
-                if (err) {
-                    console.error(err);
-                    return next(
-                        new errors.InvalidContentError(err.errors.name.message),
-                    );
-                }
-                res.send(200, data);
-                next();
-            });
-        });
+    server.put('/todos/:todo_id', async (req, res, next) => {
+        await contentValidator(req);
+        await updateData(req, res, next)
+            .then((result) => {
+                logToFile(`Updated data of item: ${result.id} from(task: ${result.old_task}, status: ${result.old_status}) to (task: ${result.new_task}, status: ${result.new_status})\n`);
+            })
+            .catch((err) => {log(err)});
+        // contentValidator(req).then(updateData(req, res, next)).then((result) => {logToFile(`Updated data of item: ${result.id} from(task: ${result.old_task}, status: ${result.old_status}) to (task: ${result.new_task}, status: ${result.new_status})\n`);}).catch((err) => { log(err); });
     });
 };

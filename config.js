@@ -6,4 +6,5 @@ module.exports = {
     db: {
         uri: process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/api',
     },
+    log_file: '/home/int21/log.txt',
 };
