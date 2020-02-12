@@ -11,7 +11,7 @@ function contentValidator(req){
                 new errors.InvalidContentError("Expects 'application/json'"),
             );
         }else{
-            resolve();
+            resolve('Validation successful!');
         }
     })
 }
@@ -96,7 +96,6 @@ function updateData(req, res, next){
                     new_task: data.task,
                     new_status: data.status
                 }
-                console.log(result);
                 resolve(result);
                 res.send(200, data);
                 next();
@@ -134,12 +133,16 @@ module.exports = function(server) {
     });
 
     server.put('/todos/:todo_id', async (req, res, next) => {
-        await contentValidator(req);
-        await updateData(req, res, next)
-            .then((result) => {
+        // await contentValidator(req);
+        // await updateData(req, res, next)
+        //     .then((result) => {
+        //         logToFile(`Updated data of item: ${result.id} from(task: ${result.old_task}, status: ${result.old_status}) to (task: ${result.new_task}, status: ${result.new_status})\n`);
+        //     })
+        //     .catch((err) => {log(err)});
+        contentValidator(req).then(() => {
+            updateData(req, res, next).then((result) => {
                 logToFile(`Updated data of item: ${result.id} from(task: ${result.old_task}, status: ${result.old_status}) to (task: ${result.new_task}, status: ${result.new_status})\n`);
-            })
-            .catch((err) => {log(err)});
-        // contentValidator(req).then(updateData(req, res, next)).then((result) => {logToFile(`Updated data of item: ${result.id} from(task: ${result.old_task}, status: ${result.old_status}) to (task: ${result.new_task}, status: ${result.new_status})\n`);}).catch((err) => { log(err); });
+            });
+        });
     });
 };
